@@ -12,6 +12,7 @@ STATSD-MONITOR
 
 TODO:
 
- * подключить https://github.com/ziutek/rrd
+ * <del>подключить https://github.com/ziutek/rrd</del>
  * нарисовать веб-интерфейс для просмотра графиков
+ * добавить отправку в upstream для создания деревьев из statsd-monitor'ов
 

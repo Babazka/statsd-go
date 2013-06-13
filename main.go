@@ -9,6 +9,7 @@ import (
 	"./rrd"
 	"log"
 	"net"
+	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
@@ -38,6 +39,7 @@ type Packet struct {
 
 var (
 	serviceAddress   = flag.String("address", ":8125", "UDP service address")
+	webAddress       = flag.String("webface", ":5400", "HTTP web interface address")
 	graphiteAddress  = flag.String("graphite", "", "Graphite service address (example: 'localhost:2003')")
 	gangliaAddress   = flag.String("ganglia", "", "Ganglia gmond servers, comma separated")
 	gangliaPort      = flag.Int("ganglia-port", 8649, "Ganglia gmond service port")
@@ -64,10 +66,10 @@ func ensure_rrd_dir_exists() {
 func mk_common_rrd(filename string) *rrd.Creator {
     t := time.Unix(time.Now().Unix() - STEP, 0)
     c := rrd.NewCreator(filename, t, STEP)
-    c.RRA("AVERAGE", 0.5, 1, 4 * 60 * 60 / STEP)
-    c.RRA("AVERAGE", 0.5, 5, 24 * 60 * 60 / (5 * STEP))
-    c.RRA("AVERAGE", 0.5, 30, 7 * 24 * 60 * 60 / (30 * STEP))
-    c.RRA("AVERAGE", 0.5, 6 * 60, 31 * 24 * 60 * 60 / (6 * 60 * STEP))
+    c.RRA("AVERAGE", 0.5, 1,         4 * 60 * 60 / STEP)
+    c.RRA("AVERAGE", 0.5, 5,         3 * 24 * 60 * 60 / (5 * STEP))
+    c.RRA("AVERAGE", 0.5, 30,       31 * 24 * 60 * 60 / (30 * STEP))
+    c.RRA("AVERAGE", 0.5, 6 * 60,    3 * 31 * 24 * 60 * 60 / (6 * 60 * STEP))
     c.RRA("AVERAGE", 0.5, 24 * 60, 365 * 24 * 60 * 60 / (24 * 60 * STEP))
     return c
 }
@@ -76,7 +78,7 @@ func mk_metric_filename(metric string) string {
     return RRD_DIR + "/" + metric + ".rrd"
 }
 
-func ensure_rrd_exists(metric string) {
+func ensure_gauge_rrd_exists(metric string) {
     filename := mk_metric_filename(metric)
     if _, err := os.Stat(filename); err == nil {
         return
@@ -92,45 +94,19 @@ func ensure_rrd_exists(metric string) {
     }
 }
 
-func write_to_rrd(metric string, value int64) {
+func write_to_gauge_rrd(metric string, value int64) {
+    metric = metric + ".gauge"
     filename := mk_metric_filename(metric)
-    ensure_rrd_exists(metric)
+    ensure_gauge_rrd_exists(metric)
     u := rrd.NewUpdater(filename)
 
     err := u.Update(time.Now(), value)
     if err != nil {
-        panic("could not update rrd file: " + err.Error())
+        panic("could not update gauge rrd file: " + err.Error())
     }
 }
 
-func ensure_counter_rrd_exists(metric string) {
-    filename := mk_metric_filename(metric)
-    if _, err := os.Stat(filename); err == nil {
-        return
-    }
-    if *debug {
-        log.Println("Creating counter rrd %s\n", filename)
-    }
-    c := mk_common_rrd(filename)
-    c.DS("rate", "GAUGE", 2 * STEP, 0, 2147483647)
-    c.DS("count", "GAUGE", 2 * STEP, 0, 2147483647)
-    err := c.Create(true)
-    if err != nil {
-        panic("could not create counter-rrd file: " + err.Error())
-    }
-}
-func write_to_counter_rrd(metric string, rate float64, count int) {
-    filename := mk_metric_filename(metric)
-    ensure_counter_rrd_exists(metric)
-    u := rrd.NewUpdater(filename)
-
-    err := u.Update(time.Now(), rate, count)
-    if err != nil {
-        panic("could not update counter-rrd file: " + err.Error())
-    }
-}
-
-func ensure_dist_rrd_exists(metric string) {
+func ensure_timing_rrd_exists(metric string) {
     filename := mk_metric_filename(metric)
     if _, err := os.Stat(filename); err == nil {
         return
@@ -143,6 +119,7 @@ func ensure_dist_rrd_exists(metric string) {
     c.DS("max", "GAUGE", 2 * STEP, 0, 2147483647)
     c.DS("avg", "GAUGE", 2 * STEP, 0, 2147483647)
     c.DS("med", "GAUGE", 2 * STEP, 0, 2147483647)
+    c.DS("q90", "GAUGE", 2 * STEP, 0, 2147483647)
     c.DS("num", "GAUGE", 2 * STEP, 0, 2147483647)
     err := c.Create(true)
     if err != nil {
@@ -150,12 +127,14 @@ func ensure_dist_rrd_exists(metric string) {
     }
 }
 
-func write_to_dist_rrd(metric string, min float64, max float64, avg float64, med float64, num int) {
+func write_to_timing_rrd(metric string, min float64, max float64, avg float64,
+                         med float64, q90 float64, num int) {
+    metric = metric + ".timing"
     filename := mk_metric_filename(metric)
-    ensure_dist_rrd_exists(metric)
+    ensure_timing_rrd_exists(metric)
     u := rrd.NewUpdater(filename)
 
-    err := u.Update(time.Now(), min, max, avg, med, num)
+    err := u.Update(time.Now(), min, max, avg, med, q90, num)
     if err != nil {
         panic("could not update dist-rrd file: " + err.Error())
     }
@@ -283,7 +262,7 @@ func submit() {
 		gmSubmitFloat(fmt.Sprintf("stats_%s", s), value)
 		fmt.Fprintf(buffer, "stats_counts.%s %d %d\n", s, c, now)
 		gmSubmit(fmt.Sprintf("stats_counts_%s", s), uint32(c))
-        write_to_counter_rrd(s, value, c)
+        write_to_gauge_rrd(s, int64(c))
 		counters[s] = 0
 		numStats++
 	}
@@ -291,7 +270,7 @@ func submit() {
 		value := int64(g)
 		fmt.Fprintf(buffer, "stats.%s %d %d\n", i, value, now)
 		gmSubmit(fmt.Sprintf("stats_%s", i), uint32(value))
-        write_to_rrd(i, value)
+        write_to_gauge_rrd(i, value)
         gauges[i] = 0  // why wasn't it in the original?
 		numStats++
 	}
@@ -302,6 +281,7 @@ func submit() {
 			max := float64(t[len(t)-1])
 			med := float64(t[len(t)/2])
 			mean := float64(min)
+            q90 := float64(t[len(t)*9/10])
 			maxAtThreshold := float64(max)
 			count := len(t)
 			if len(t) > 1 {
@@ -331,7 +311,7 @@ func submit() {
 			fmt.Fprintf(buffer, "stats.timers.%s.count %d %d\n", u, count, now)
 			gmSubmit(fmt.Sprintf("stats_timers_%s_count", u), uint32(count))
 
-            write_to_dist_rrd(u, min, max, mean, med, count);
+            write_to_timing_rrd(u, min, max, mean, med, q90, count);
 		} else {
 			// Need to still submit timers as zero
 			fmt.Fprintf(buffer, "stats.timers.%s.mean %f %d\n", u, 0, now)
@@ -345,7 +325,7 @@ func submit() {
 			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_lower", u), 0)
 			fmt.Fprintf(buffer, "stats.timers.%s.count %d %d\n", u, 0, now)
 			gmSubmit(fmt.Sprintf("stats_timers_%s_count", u), uint32(0))
-            write_to_dist_rrd(u, 0, 0, 0, 0, 0);
+            write_to_timing_rrd(u, 0, 0, 0, 0, 0, 0);
 		}
 		numStats++
 	}
@@ -414,8 +394,18 @@ func udpListener() {
 	}
 }
 
+func http_main(w http.ResponseWriter, r *http.Request) {
+    fmt.Fprintf(w, "Hi there, I love %s!", r.URL.Path[1:])
+}
+
+func httpServer() {
+    http.HandleFunc("/", http_main)
+    http.ListenAndServe(*webAddress, nil)
+}
+
 func main() {
 	flag.Parse()
 	go udpListener()
+	go httpServer()
 	monitor()
 }
