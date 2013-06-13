@@ -7,6 +7,9 @@ STATSD-MONITOR
 
 Основано на [STATSD-GO](https://github.com/jbuchbinder/).
 
+Зависимости:
+ * `librrd-dev`
+
 TODO:
 
  * подключить https://github.com/ziutek/rrd

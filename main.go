@@ -1,10 +1,12 @@
 package main
 
 import (
+	"os"
 	"bytes"
 	"flag"
 	"fmt"
 	"./gmetric"
+	"./rrd"
 	"log"
 	"net"
 	"regexp"
@@ -19,6 +21,14 @@ const (
 	UDP = "udp"
 )
 
+const (
+    RRD_DIR = "data"
+)
+
+const (
+    STEP = 30
+)
+
 type Packet struct {
 	Bucket   string
 	Value    string
@@ -29,10 +39,10 @@ type Packet struct {
 var (
 	serviceAddress   = flag.String("address", ":8125", "UDP service address")
 	graphiteAddress  = flag.String("graphite", "", "Graphite service address (example: 'localhost:2003')")
-	gangliaAddress   = flag.String("ganglia", "localhost", "Ganglia gmond servers, comma separated")
+	gangliaAddress   = flag.String("ganglia", "", "Ganglia gmond servers, comma separated")
 	gangliaPort      = flag.Int("ganglia-port", 8649, "Ganglia gmond service port")
 	gangliaSpoofHost = flag.String("ganglia-spoof-host", "", "Ganglia gmond spoof host string")
-	flushInterval    = flag.Int64("flush-interval", 10, "Flush interval")
+	flushInterval    = flag.Int64("flush-interval", STEP, "Flush interval")
 	percentThreshold = flag.Int("percent-threshold", 90, "Threshold percent")
 	debug            = flag.Bool("debug", false, "Debug mode")
 )
@@ -43,6 +53,113 @@ var (
 	timers   = make(map[string][]float64)
 	gauges   = make(map[string]int)
 )
+
+func ensure_rrd_dir_exists() {
+    if _, err := os.Stat(RRD_DIR); err == nil {
+        return
+    }
+    os.Mkdir(RRD_DIR, 0755)
+}
+
+func mk_common_rrd(filename string) *rrd.Creator {
+    t := time.Unix(time.Now().Unix() - STEP, 0)
+    c := rrd.NewCreator(filename, t, STEP)
+    c.RRA("AVERAGE", 0.5, 1, 4 * 60 * 60 / STEP)
+    c.RRA("AVERAGE", 0.5, 5, 24 * 60 * 60 / (5 * STEP))
+    c.RRA("AVERAGE", 0.5, 30, 7 * 24 * 60 * 60 / (30 * STEP))
+    c.RRA("AVERAGE", 0.5, 6 * 60, 31 * 24 * 60 * 60 / (6 * 60 * STEP))
+    c.RRA("AVERAGE", 0.5, 24 * 60, 365 * 24 * 60 * 60 / (24 * 60 * STEP))
+    return c
+}
+
+func mk_metric_filename(metric string) string {
+    return RRD_DIR + "/" + metric + ".rrd"
+}
+
+func ensure_rrd_exists(metric string) {
+    filename := mk_metric_filename(metric)
+    if _, err := os.Stat(filename); err == nil {
+        return
+    }
+    if *debug {
+        log.Println("Creating rrd %s\n", filename)
+    }
+    c := mk_common_rrd(filename)
+    c.DS("g", "GAUGE", 2 * STEP, 0, 2147483647)
+    err := c.Create(true)
+    if err != nil {
+        panic("could not create rrd file: " + err.Error())
+    }
+}
+
+func write_to_rrd(metric string, value int64) {
+    filename := mk_metric_filename(metric)
+    ensure_rrd_exists(metric)
+    u := rrd.NewUpdater(filename)
+
+    err := u.Update(time.Now(), value)
+    if err != nil {
+        panic("could not update rrd file: " + err.Error())
+    }
+}
+
+func ensure_counter_rrd_exists(metric string) {
+    filename := mk_metric_filename(metric)
+    if _, err := os.Stat(filename); err == nil {
+        return
+    }
+    if *debug {
+        log.Println("Creating counter rrd %s\n", filename)
+    }
+    c := mk_common_rrd(filename)
+    c.DS("rate", "GAUGE", 2 * STEP, 0, 2147483647)
+    c.DS("count", "GAUGE", 2 * STEP, 0, 2147483647)
+    err := c.Create(true)
+    if err != nil {
+        panic("could not create counter-rrd file: " + err.Error())
+    }
+}
+func write_to_counter_rrd(metric string, rate float64, count int) {
+    filename := mk_metric_filename(metric)
+    ensure_counter_rrd_exists(metric)
+    u := rrd.NewUpdater(filename)
+
+    err := u.Update(time.Now(), rate, count)
+    if err != nil {
+        panic("could not update counter-rrd file: " + err.Error())
+    }
+}
+
+func ensure_dist_rrd_exists(metric string) {
+    filename := mk_metric_filename(metric)
+    if _, err := os.Stat(filename); err == nil {
+        return
+    }
+    if *debug {
+        log.Println("Creating dist rrd %s\n", filename)
+    }
+    c := mk_common_rrd(filename)
+    c.DS("min", "GAUGE", 2 * STEP, 0, 2147483647)
+    c.DS("max", "GAUGE", 2 * STEP, 0, 2147483647)
+    c.DS("avg", "GAUGE", 2 * STEP, 0, 2147483647)
+    c.DS("med", "GAUGE", 2 * STEP, 0, 2147483647)
+    c.DS("num", "GAUGE", 2 * STEP, 0, 2147483647)
+    err := c.Create(true)
+    if err != nil {
+        panic("could not create dist-rrd file: " + err.Error())
+    }
+}
+
+func write_to_dist_rrd(metric string, min float64, max float64, avg float64, med float64, num int) {
+    filename := mk_metric_filename(metric)
+    ensure_dist_rrd_exists(metric)
+    u := rrd.NewUpdater(filename)
+
+    err := u.Update(time.Now(), min, max, avg, med, num)
+    if err != nil {
+        panic("could not update dist-rrd file: " + err.Error())
+    }
+}
 
 func monitor() {
 	var err error
@@ -61,8 +178,7 @@ func monitor() {
 					var t []float64
 					timers[s.Bucket] = t
 				}
-				//intValue, _ := strconv.Atoi(s.Value)
-				floatValue, _ := strconv.ParseFloat(s.Value, 64)
+				floatValue, _ := strconv.ParseFloat(s.Value, 32)
 				timers[s.Bucket] = append(timers[s.Bucket], floatValue)
 			} else if s.Modifier == "g" {
 				_, ok := gauges[s.Bucket]
@@ -85,6 +201,9 @@ func monitor() {
 
 func submit() {
 	var clientGraphite net.Conn
+
+    ensure_rrd_dir_exists()
+
 	if *graphiteAddress != "" {
 		var err error
 		clientGraphite, err = net.Dial(TCP, *graphiteAddress)
@@ -164,6 +283,7 @@ func submit() {
 		gmSubmitFloat(fmt.Sprintf("stats_%s", s), value)
 		fmt.Fprintf(buffer, "stats_counts.%s %d %d\n", s, c, now)
 		gmSubmit(fmt.Sprintf("stats_counts_%s", s), uint32(c))
+        write_to_counter_rrd(s, value, c)
 		counters[s] = 0
 		numStats++
 	}
@@ -171,6 +291,8 @@ func submit() {
 		value := int64(g)
 		fmt.Fprintf(buffer, "stats.%s %d %d\n", i, value, now)
 		gmSubmit(fmt.Sprintf("stats_%s", i), uint32(value))
+        write_to_rrd(i, value)
+        gauges[i] = 0  // why wasn't it in the original?
 		numStats++
 	}
 	for u, t := range timers {
@@ -178,6 +300,7 @@ func submit() {
 			sort.Float64s(t)
 			min := float64(t[0])
 			max := float64(t[len(t)-1])
+			med := float64(t[len(t)/2])
 			mean := float64(min)
 			maxAtThreshold := float64(max)
 			count := len(t)
@@ -207,6 +330,8 @@ func submit() {
 			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_lower", u), min)
 			fmt.Fprintf(buffer, "stats.timers.%s.count %d %d\n", u, count, now)
 			gmSubmit(fmt.Sprintf("stats_timers_%s_count", u), uint32(count))
+
+            write_to_dist_rrd(u, min, max, mean, med, count);
 		} else {
 			// Need to still submit timers as zero
 			fmt.Fprintf(buffer, "stats.timers.%s.mean %f %d\n", u, 0, now)
@@ -220,6 +345,7 @@ func submit() {
 			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_lower", u), 0)
 			fmt.Fprintf(buffer, "stats.timers.%s.count %d %d\n", u, 0, now)
 			gmSubmit(fmt.Sprintf("stats_timers_%s_count", u), uint32(0))
+            write_to_dist_rrd(u, 0, 0, 0, 0, 0);
 		}
 		numStats++
 	}
@@ -237,7 +363,7 @@ func handleMessage(conn *net.UDPConn, remaddr net.Addr, buf *bytes.Buffer) {
 	var packet Packet
 	var value string
 	var sanitizeRegexp = regexp.MustCompile("[^a-zA-Z0-9\\-_\\.:\\|@]")
-	var packetRegexp = regexp.MustCompile("([a-zA-Z0-9_]+):(\\-?[0-9\\.]+)\\|(c|ms)(\\|@([0-9\\.]+))?")
+	var packetRegexp = regexp.MustCompile("([a-zA-Z0-9_]+):(\\-?[0-9\\.]+)\\|(c|g|ms)(\\|@([0-9\\.]+))?")
 	s := sanitizeRegexp.ReplaceAllString(buf.String(), "")
 	for _, item := range packetRegexp.FindAllStringSubmatch(s, -1) {
 		value = item[2]
@@ -259,7 +385,7 @@ func handleMessage(conn *net.UDPConn, remaddr net.Addr, buf *bytes.Buffer) {
 		packet.Sampling = float32(sampleRate)
 
 		if *debug {
-			log.Println("Packet: bucket = %s, value = %s, modifier = %s, sampling = %f\n", packet.Bucket, packet.Value, packet.Modifier, packet.Sampling)
+			log.Printf("Packet: bucket = %s, value = %s, modifier = %s, sampling = %f\n", packet.Bucket, packet.Value, packet.Modifier, packet.Sampling)
 		}
 
 		In <- packet
@@ -273,6 +399,7 @@ func udpListener() {
 	if err != nil {
 		log.Fatalf("ListenAndServe: %s", err.Error())
 	}
+    log.Printf("Listening to UDP at %s", *serviceAddress)
 	for {
 		message := make([]byte, 512)
 		n, remaddr, error := listener.ReadFrom(message)
@@ -281,7 +408,7 @@ func udpListener() {
 		}
 		buf := bytes.NewBuffer(message[0:n])
 		if *debug {
-			log.Println("Packet received: " + string(message[0:n]) + "\n")
+			log.Println("Packet received: " + string(message[0:n]))
 		}
 		go handleMessage(listener, remaddr, buf)
 	}
