@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"github.com/jbuchbinder/go-gmetric/gmetric"
+	"./gmetric"
 	"log"
 	"net"
 	"regexp"
