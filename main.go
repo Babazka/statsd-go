@@ -417,7 +417,11 @@ func http_metric_page(w http.ResponseWriter, r *http.Request, metric string, met
     if metric_type == "timing" {
         fmt.Fprintf(w, "<img src=\"/%s/timing/\">", metric)
     }
-    fmt.Fprintf(w, "<img src=\"/%s/gauge/\">", metric)
+    if file_exists(mk_metric_filename(metric + "_bad.gauge")) {
+        fmt.Fprintf(w, "<img src=\"/%s/gaugebad/\">", metric)
+    } else {
+        fmt.Fprintf(w, "<img src=\"/%s/gauge/\">", metric)
+    }
 }
 
 func http_main(w http.ResponseWriter, r *http.Request) {
