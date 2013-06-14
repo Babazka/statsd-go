@@ -412,6 +412,14 @@ func get_metric_type(metric string) string {
     return ""
 }
 
+func http_metric_page(w http.ResponseWriter, r *http.Request, metric string, metric_type string) {
+    w.Header().Set("Content-type", "text/html")
+    if metric_type == "timing" {
+        fmt.Fprintf(w, "<img src=\"/%s/timing/\">", metric)
+    }
+    fmt.Fprintf(w, "<img src=\"/%s/gauge/\">", metric)
+}
+
 func http_main(w http.ResponseWriter, r *http.Request) {
     path := strings.Split(r.URL.Path[1:], "/")
 
@@ -431,6 +439,10 @@ func http_main(w http.ResponseWriter, r *http.Request) {
 
     filename := mk_metric_filename(metric + "." + metric_type)
     if len(path) > 1 {
+        if path[1] == "html" {
+            http_metric_page(w, r, metric, metric_type)
+            return
+        }
         metric_type = path[1]
     }
 
@@ -446,13 +458,13 @@ func http_main(w http.ResponseWriter, r *http.Request) {
         g.VDef("v_max", "gpm,MAXIMUM")
         g.VDef("v_min", "gpm,MINIMUM")
         g.VDef("v_avg", "gpm,AVERAGE")
-        g.VDef("v_q90", "gpm,90,PERCENTNAN")
+        /*g.VDef("v_q90", "gpm,90,PERCENTNAN")*/
         g.Area("gpm", "eeffee")
         g.Line(2, "gpm", "008800")
         g.GPrint("v_min", "min = %.0lf")
         g.GPrint("v_max", "max = %.0lf")
         g.GPrint("v_avg", "avg = %.0lf")
-        g.GPrint("v_q90", "q90 = %.0lf")
+        /*g.GPrint("v_q90", "q90 = %.0lf")*/
     } else if metric_type == "gaugebad" {
         bad_filename := mk_metric_filename(metric + "_bad.gauge")
         if !file_exists(bad_filename) {
@@ -471,7 +483,7 @@ func http_main(w http.ResponseWriter, r *http.Request) {
         g.VDef("v_min", "gpm,MINIMUM")
         g.VDef("v_avg", "gpm,AVERAGE")
         g.VDef("v_rat", "ratio,AVERAGE")
-        g.VDef("v_q90", "gpm,90,PERCENTNAN")
+        /*g.VDef("v_q90", "gpm,90,PERCENTNAN")*/
         g.Area("gpm", "eeffee")
         g.Area("bpm", "ffeeee")
         g.Line(2, "gpm", "008800")
@@ -479,12 +491,13 @@ func http_main(w http.ResponseWriter, r *http.Request) {
         g.GPrint("v_min", "min = %.0lf")
         g.GPrint("v_max", "max = %.0lf")
         g.GPrint("v_avg", "avg = %.0lf")
-        g.GPrint("v_q90", "q90 = %.0lf")
+        /*g.GPrint("v_q90", "q90 = %.0lf")*/
         g.GPrint("v_rat", "bad = %.0lf%%")
     } else if metric_type == "timing" {
         g.SetTitle(metric)
         g.SetLowerLimit(0)
         g.SetVLabel("ms")
+        g.SetUnitsExponent(0)
         g.Def("tmin", filename, "min", "AVERAGE")
         g.Def("tmax", filename, "max", "AVERAGE")
         g.Def("q50", filename, "med", "AVERAGE")
