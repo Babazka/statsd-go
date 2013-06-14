@@ -4,7 +4,8 @@ package rrd
 #include <stdlib.h>
 #include <rrd.h>
 #include "rrdfunc.h"
-#cgo LDFLAGS: -lrrd_th
+#cgo CFLAGS: -I/usr/include/cairo -I/usr/include/libpng12 -I/usr/include/glib-2.0 -I/usr/lib/x86_64-linux-gnu/glib-2.0/include -I/usr/include/pixman-1 -I/usr/include/freetype2  -pthread -I/usr/include/pango-1.0 -I/usr/include/libpng12   -I/usr/include/libxml2
+#cgo LDFLAGS:  -lxml2 -lglib-2.0 -lcairo -lm  -lpng12 -lpangocairo-1.0 -lpango-1.0 -lgobject-2.0
 */
 import "C"
 import (
