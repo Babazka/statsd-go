@@ -109,6 +109,7 @@ char *strchr (), *strrchr ();
 # endif
 #endif
 
+
 #ifdef NO_NULL_REALLOC
 # define rrd_realloc(a,b) ( (a) == NULL ? malloc( (b) ) : realloc( (a) , (b) ))
 #else
