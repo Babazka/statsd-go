@@ -417,11 +417,12 @@ func http_metric_page(w http.ResponseWriter, r *http.Request, metric string, met
     if metric_type == "timing" {
         fmt.Fprintf(w, "<img src=\"/%s/timing/\">", metric)
     }
-    if file_exists(mk_metric_filename(metric + "_bad.gauge")) {
+    if file_exists(mk_metric_filename(metric + ".bad.gauge")) {
         fmt.Fprintf(w, "<img src=\"/%s/gaugebad/\">", metric)
     } else {
         fmt.Fprintf(w, "<img src=\"/%s/gauge/\">", metric)
     }
+    fmt.Fprintf(w, "<br/>")
 }
 
 func http_main(w http.ResponseWriter, r *http.Request) {
@@ -433,102 +434,105 @@ func http_main(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    metric := path[0]
-    metric_type := get_metric_type(metric)
+    metrics := strings.Split(path[0], ";")
+    for _, metric := range metrics {
+        metric_type := get_metric_type(metric)
 
-    if metric_type == "" {
-        fmt.Fprintf(w, "no such metric: %s", metric)
-        return
-    }
-
-    filename := mk_metric_filename(metric + "." + metric_type)
-    if len(path) > 1 {
-        if path[1] == "html" {
-            http_metric_page(w, r, metric, metric_type)
+        if metric_type == "" {
+            fmt.Fprintf(w, "no such metric: %s", metric)
             return
         }
-        metric_type = path[1]
-    }
 
-    t := time.Now()
+        filename := mk_metric_filename(metric + "." + metric_type)
+        if len(path) > 1 {
+            if path[1] == "html" {
+                http_metric_page(w, r, metric, metric_type)
+                continue
+            }
+            metric_type = path[1]
+        }
 
-    g := rrd.NewGrapher()
-    if metric_type == "gauge" {
-        g.SetTitle(metric)
-        g.SetLowerLimit(0)
-        g.SetVLabel("events / minute")
-        g.Def("g", filename, "num", "AVERAGE")
-        g.CDef("gpm", fmt.Sprintf("g,%d,*", 60 / STEP))
-        g.VDef("v_max", "gpm,MAXIMUM")
-        g.VDef("v_min", "gpm,MINIMUM")
-        g.VDef("v_avg", "gpm,AVERAGE")
-        /*g.VDef("v_q90", "gpm,90,PERCENTNAN")*/
-        g.Area("gpm", "eeffee")
-        g.Line(2, "gpm", "008800")
-        g.GPrint("v_min", "min = %.0lf")
-        g.GPrint("v_max", "max = %.0lf")
-        g.GPrint("v_avg", "avg = %.0lf")
-        /*g.GPrint("v_q90", "q90 = %.0lf")*/
-    } else if metric_type == "gaugebad" {
-        bad_filename := mk_metric_filename(metric + "_bad.gauge")
-        if !file_exists(bad_filename) {
-            fmt.Fprintf(w, "no such metric: %s_bad", metric)
+        t := time.Now()
+
+        g := rrd.NewGrapher()
+        if metric_type == "gauge" {
+            g.SetTitle(metric)
+            g.SetLowerLimit(0)
+            g.SetVLabel("events / minute")
+            g.Def("g", filename, "num", "AVERAGE")
+            g.CDef("gpm", fmt.Sprintf("g,%d,*", 60 / STEP))
+            g.VDef("v_max", "gpm,MAXIMUM")
+            g.VDef("v_min", "gpm,MINIMUM")
+            g.VDef("v_avg", "gpm,AVERAGE")
+            /*g.VDef("v_q90", "gpm,90,PERCENTNAN")*/
+            g.Area("gpm", "eeffee")
+            g.Line(2, "gpm", "008800")
+            g.GPrint("v_min", "min = %.0lf")
+            g.GPrint("v_max", "max = %.0lf")
+            g.GPrint("v_avg", "avg = %.0lf")
+            /*g.GPrint("v_q90", "q90 = %.0lf")*/
+        } else if metric_type == "gaugebad" {
+            bad_filename := mk_metric_filename(metric + ".bad.gauge")
+            if !file_exists(bad_filename) {
+                fmt.Fprintf(w, "no such metric: %s.bad", metric)
+                return
+            }
+            g.SetTitle(metric)
+            g.SetLowerLimit(0)
+            g.SetVLabel("events / minute")
+            g.Def("g", filename, "num", "AVERAGE")
+            g.Def("b", bad_filename, "num", "AVERAGE")
+            g.CDef("gpm", fmt.Sprintf("g,%d,*", 60 / STEP))
+            g.CDef("bpm", fmt.Sprintf("b,%d,*", 60 / STEP))
+            g.CDef("ratio", "bpm,gpm,/,100,*")
+            g.VDef("v_max", "gpm,MAXIMUM")
+            g.VDef("v_min", "gpm,MINIMUM")
+            g.VDef("v_avg", "gpm,AVERAGE")
+            g.VDef("v_rat", "ratio,AVERAGE")
+            /*g.VDef("v_q90", "gpm,90,PERCENTNAN")*/
+            g.Area("gpm", "eeffee")
+            g.Area("bpm", "ffeeee")
+            g.Line(2, "gpm", "008800")
+            g.Line(2, "bpm", "880000")
+            g.GPrint("v_min", "min = %.0lf")
+            g.GPrint("v_max", "max = %.0lf")
+            g.GPrint("v_avg", "avg = %.0lf")
+            /*g.GPrint("v_q90", "q90 = %.0lf")*/
+            g.GPrint("v_rat", "bad = %.0lf%%")
+        } else if metric_type == "timing" {
+            g.SetTitle(metric)
+            g.SetLowerLimit(0)
+            g.SetVLabel("ms")
+            g.SetUnitsExponent(0)
+            g.Def("tmin", filename, "min", "AVERAGE")
+            g.Def("tmax", filename, "max", "AVERAGE")
+            g.Def("q50", filename, "med", "AVERAGE")
+            g.Def("q90", filename, "q90", "AVERAGE")
+            g.Def("tavg", filename, "avg", "AVERAGE")
+            g.VDef("v_max", "tmax,MAXIMUM")
+            g.VDef("v_min", "tmin,MINIMUM")
+            g.VDef("v_avg", "tavg,AVERAGE")
+            g.VDef("v_q90", "q90,AVERAGE")
+            g.Area("q90", "eeeeff")
+            g.Line(2, "q50", "000088")
+            g.Line(1, "q90", "000088")
+            g.Line(1, "tmin", "bbbb88")
+            g.Line(1, "tmax", "bbbb88")
+            g.GPrint("v_min", "min = %.0lf")
+            g.GPrint("v_max", "max = %.0lf")
+            g.GPrint("v_avg", "avg = %.0lf")
+            g.GPrint("v_q90", "q90 = %.0lf")
+        }
+
+        _, buf, err := g.Graph(t.Add(-30*60*time.Second), t)
+        if err != nil {
+            fmt.Fprintf(w, "graph error: %s", err.Error())
             return
         }
-        g.SetTitle(metric)
-        g.SetLowerLimit(0)
-        g.SetVLabel("events / minute")
-        g.Def("g", filename, "num", "AVERAGE")
-        g.Def("b", bad_filename, "num", "AVERAGE")
-        g.CDef("gpm", fmt.Sprintf("g,%d,*", 60 / STEP))
-        g.CDef("bpm", fmt.Sprintf("b,%d,*", 60 / STEP))
-        g.CDef("ratio", "bpm,gpm,/,100,*")
-        g.VDef("v_max", "gpm,MAXIMUM")
-        g.VDef("v_min", "gpm,MINIMUM")
-        g.VDef("v_avg", "gpm,AVERAGE")
-        g.VDef("v_rat", "ratio,AVERAGE")
-        /*g.VDef("v_q90", "gpm,90,PERCENTNAN")*/
-        g.Area("gpm", "eeffee")
-        g.Area("bpm", "ffeeee")
-        g.Line(2, "gpm", "008800")
-        g.Line(2, "bpm", "880000")
-        g.GPrint("v_min", "min = %.0lf")
-        g.GPrint("v_max", "max = %.0lf")
-        g.GPrint("v_avg", "avg = %.0lf")
-        /*g.GPrint("v_q90", "q90 = %.0lf")*/
-        g.GPrint("v_rat", "bad = %.0lf%%")
-    } else if metric_type == "timing" {
-        g.SetTitle(metric)
-        g.SetLowerLimit(0)
-        g.SetVLabel("ms")
-        g.SetUnitsExponent(0)
-        g.Def("tmin", filename, "min", "AVERAGE")
-        g.Def("tmax", filename, "max", "AVERAGE")
-        g.Def("q50", filename, "med", "AVERAGE")
-        g.Def("q90", filename, "q90", "AVERAGE")
-        g.Def("tavg", filename, "avg", "AVERAGE")
-        g.VDef("v_max", "tmax,MAXIMUM")
-        g.VDef("v_min", "tmin,MINIMUM")
-        g.VDef("v_avg", "tavg,AVERAGE")
-        g.VDef("v_q90", "q90,AVERAGE")
-        g.Area("q90", "eeeeff")
-        g.Line(2, "q50", "000088")
-        g.Line(1, "q90", "000088")
-        g.Line(1, "tmin", "bbbb88")
-        g.Line(1, "tmax", "bbbb88")
-        g.GPrint("v_min", "min = %.0lf")
-        g.GPrint("v_max", "max = %.0lf")
-        g.GPrint("v_avg", "avg = %.0lf")
-        g.GPrint("v_q90", "q90 = %.0lf")
-    }
-
-	_, buf, err := g.Graph(t.Add(-30*60*time.Second), t)
-	if err != nil {
-        fmt.Fprintf(w, "graph error: %s", err.Error())
+        w.Header().Set("Content-type", "image/png")
+        w.Write(buf)
         return
-	}
-    w.Header().Set("Content-type", "image/png")
-    w.Write(buf)
+    }
 }
 
 func httpServer() {
