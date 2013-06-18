@@ -412,15 +412,15 @@ func get_metric_type(metric string) string {
     return ""
 }
 
-func http_metric_page(w http.ResponseWriter, r *http.Request, metric string, metric_type string) {
+func http_metric_page(w http.ResponseWriter, r *http.Request, metric string, metric_type string, path_tail string) {
     w.Header().Set("Content-type", "text/html")
     if metric_type == "timing" {
-        fmt.Fprintf(w, "<img src=\"/%s/timing/\">", metric)
+        fmt.Fprintf(w, "<img src=\"/%s/timing/%s\">", metric, path_tail)
     }
     if file_exists(mk_metric_filename(metric + ".bad.gauge")) {
-        fmt.Fprintf(w, "<img src=\"/%s/gaugebad/\">", metric)
+        fmt.Fprintf(w, "<img src=\"/%s/gaugebad/%s\">", metric, path_tail)
     } else {
-        fmt.Fprintf(w, "<img src=\"/%s/gauge/\">", metric)
+        fmt.Fprintf(w, "<img src=\"/%s/gauge/%s\">", metric, path_tail)
     }
     fmt.Fprintf(w, "<br/>")
 }
@@ -446,13 +446,23 @@ func http_main(w http.ResponseWriter, r *http.Request) {
         filename := mk_metric_filename(metric + "." + metric_type)
         if len(path) > 1 {
             if path[1] == "html" {
-                http_metric_page(w, r, metric, metric_type)
+                http_metric_page(w, r, metric, metric_type, strings.Join(path[2:], "/"))
                 continue
             }
             metric_type = path[1]
         }
 
         t := time.Now()
+        minutes := 30;
+
+        if len(path) > 2 && len(path[2]) > 0 {
+            m, err := strconv.Atoi(path[2])
+            if err != nil {
+                fmt.Fprintf(w, "third argument must be a number of minutes")
+                return
+            }
+            minutes = m
+        }
 
         g := rrd.NewGrapher()
         if metric_type == "gauge" {
@@ -514,17 +524,17 @@ func http_main(w http.ResponseWriter, r *http.Request) {
             g.VDef("v_avg", "tavg,AVERAGE")
             g.VDef("v_q90", "q90,AVERAGE")
             g.Area("q90", "eeeeff")
-            g.Line(2, "q50", "000088")
+            g.Line(2, "tavg", "000088")
             g.Line(1, "q90", "000088")
             g.Line(1, "tmin", "bbbb88")
-            g.Line(1, "tmax", "bbbb88")
+            /*g.Line(1, "tmax", "bbbb88")*/
             g.GPrint("v_min", "min = %.0lf")
             g.GPrint("v_max", "max = %.0lf")
             g.GPrint("v_avg", "avg = %.0lf")
             g.GPrint("v_q90", "q90 = %.0lf")
         }
 
-        _, buf, err := g.Graph(t.Add(-30*60*time.Second), t)
+        _, buf, err := g.Graph(t.Add(-time.Duration(60*minutes)*time.Second), t)
         if err != nil {
             fmt.Fprintf(w, "graph error: %s", err.Error())
             return
