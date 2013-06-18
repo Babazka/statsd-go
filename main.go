@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"bytes"
+	"io/ioutil"
 	"flag"
 	"fmt"
 	"./gmetric"
@@ -425,6 +426,13 @@ func http_metric_page(w http.ResponseWriter, r *http.Request, metric string, met
     fmt.Fprintf(w, "<br/>")
 }
 
+func concat(old1, old2 []string) []string {
+    newslice := make([]string, len(old1) + len(old2))
+    copy(newslice, old1)
+    copy(newslice[len(old1):], old2)
+    return newslice
+}
+
 func http_main(w http.ResponseWriter, r *http.Request) {
     path := strings.Split(r.URL.Path[1:], "/")
 
@@ -435,6 +443,34 @@ func http_main(w http.ResponseWriter, r *http.Request) {
     }
 
     metrics := strings.Split(path[0], ";")
+
+    if path[0] == "index" {
+        search_prefix := ""
+
+        if len(path) > 1 && len(path[1]) != 0  {
+            search_prefix = path[1]
+            path = concat([]string{"index", "html"}, path[2:])
+        } else {
+            path = concat([]string{"index", "html"}, path[1:])
+        }
+
+        files, err := ioutil.ReadDir(RRD_DIR)
+        if err != nil {
+            fmt.Fprintf(w, "Error while enumerating metrics: %s", err.Error())
+            return
+        }
+        metrics = make([]string, 0)
+        for _, file := range files {
+            if !strings.HasSuffix(file.Name(), ".timing.rrd") {
+                continue
+            }
+            if !strings.HasPrefix(file.Name(), search_prefix) {
+                continue
+            }
+            metrics = append(metrics, strings.Replace(file.Name(), ".timing.rrd", "", 1))
+        }
+    }
+
     for _, metric := range metrics {
         metric_type := get_metric_type(metric)
 
