@@ -293,6 +293,7 @@ func submit() {
             q90 := float64(t[len(t)*9/10])
 			maxAtThreshold := float64(max)
 			count := len(t)
+			count_ps := float64(count) / float64(*flushInterval)
 			if len(t) > 1 {
 				var thresholdIndex int
 				thresholdIndex = ((100 - *percentThreshold) / 100) * count
@@ -318,6 +319,7 @@ func submit() {
 			fmt.Fprintf(buffer, "stats.timers.%s.lower %f %d\n", u, min, now)
 			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_lower", u), min)
 			fmt.Fprintf(buffer, "stats.timers.%s.count %d %d\n", u, count, now)
+			fmt.Fprintf(buffer, "stats.timers.%s.count_ps %f %d\n", u, count_ps, now)
 			gmSubmit(fmt.Sprintf("stats_timers_%s_count", u), uint32(count))
 
             write_to_timing_rrd(u, min, max, mean, med, q90, count);
@@ -333,6 +335,7 @@ func submit() {
 			fmt.Fprintf(buffer, "stats.timers.%s.lower %f %d\n", u, 0, now)
 			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_lower", u), 0)
 			fmt.Fprintf(buffer, "stats.timers.%s.count %d %d\n", u, 0, now)
+			fmt.Fprintf(buffer, "stats.timers.%s.count_ps %f %d\n", u, 0, now)
 			gmSubmit(fmt.Sprintf("stats_timers_%s_count", u), uint32(0))
             write_to_timing_rrd(u, 0, 0, 0, 0, 0, 0);
 		}
@@ -352,7 +355,7 @@ func handleMessage(conn *net.UDPConn, remaddr net.Addr, buf *bytes.Buffer) {
 	var packet Packet
 	var value string
 	var sanitizeRegexp = regexp.MustCompile("[^a-zA-Z0-9\\-_\\.:\\|@]")
-	var packetRegexp = regexp.MustCompile("([a-zA-Z0-9_\\.]+):(\\-?[0-9\\.]+)\\|(c|g|ms)(\\|@([0-9\\.]+))?")
+	var packetRegexp = regexp.MustCompile("([a-zA-Z0-9_\\.\\-]+):(\\-?[0-9\\.]+)\\|(c|g|ms)(\\|@([0-9\\.]+))?")
 	s := sanitizeRegexp.ReplaceAllString(buf.String(), "")
 	for _, item := range packetRegexp.FindAllStringSubmatch(s, -1) {
 		value = item[2]
