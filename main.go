@@ -28,10 +28,6 @@ const (
     RRD_DIR = "data"
 )
 
-const (
-    STEP = 30
-)
-
 type Packet struct {
 	Bucket   string
 	Value    string
@@ -46,7 +42,7 @@ var (
 	gangliaAddress   = flag.String("ganglia", "", "Ganglia gmond servers, comma separated")
 	gangliaPort      = flag.Int("ganglia-port", 8649, "Ganglia gmond service port")
 	gangliaSpoofHost = flag.String("ganglia-spoof-host", "", "Ganglia gmond spoof host string")
-	flushInterval    = flag.Int64("flush-interval", STEP, "Flush interval")
+	flushInterval    = flag.Int64("flush-interval", 30, "Flush interval")
 	percentThreshold = flag.Int("percent-threshold", 90, "Threshold percent")
 	debug            = flag.Bool("debug", false, "Debug mode")
 )
@@ -73,13 +69,13 @@ func ensure_rrd_dir_exists() {
 }
 
 func mk_common_rrd(filename string) *rrd.Creator {
-    t := time.Unix(time.Now().Unix() - STEP, 0)
-    c := rrd.NewCreator(filename, t, STEP)
-    c.RRA("AVERAGE", 0.5, 1,         4 * 60 * 60 / STEP)
-    c.RRA("AVERAGE", 0.5, 5,         3 * 24 * 60 * 60 / (5 * STEP))
-    c.RRA("AVERAGE", 0.5, 30,       31 * 24 * 60 * 60 / (30 * STEP))
-    c.RRA("AVERAGE", 0.5, 6 * 60,    3 * 31 * 24 * 60 * 60 / (6 * 60 * STEP))
-    c.RRA("AVERAGE", 0.5, 24 * 60, 365 * 24 * 60 * 60 / (24 * 60 * STEP))
+    t := time.Unix(time.Now().Unix() - (*flushInterval), 0)
+    c := rrd.NewCreator(filename, t, (*flushInterval))
+    c.RRA("AVERAGE", 0.5, 1,         4 * 60 * 60 / (*flushInterval))
+    c.RRA("AVERAGE", 0.5, 5,         3 * 24 * 60 * 60 / (5 * (*flushInterval)))
+    c.RRA("AVERAGE", 0.5, 30,       31 * 24 * 60 * 60 / (30 * (*flushInterval)))
+    c.RRA("AVERAGE", 0.5, 6 * 60,    3 * 31 * 24 * 60 * 60 / (6 * 60 * (*flushInterval)))
+    c.RRA("AVERAGE", 0.5, 24 * 60, 365 * 24 * 60 * 60 / (24 * 60 * (*flushInterval)))
     return c
 }
 
@@ -96,7 +92,7 @@ func ensure_gauge_rrd_exists(metric string) {
         log.Println("Creating rrd %s\n", filename)
     }
     c := mk_common_rrd(filename)
-    c.DS("num", "GAUGE", 2 * STEP, 0, 2147483647)
+    c.DS("num", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
     err := c.Create(true)
     if err != nil {
         panic("could not create rrd file: " + err.Error())
@@ -124,12 +120,12 @@ func ensure_timing_rrd_exists(metric string) {
         log.Println("Creating dist rrd %s\n", filename)
     }
     c := mk_common_rrd(filename)
-    c.DS("min", "GAUGE", 2 * STEP, 0, 2147483647)
-    c.DS("max", "GAUGE", 2 * STEP, 0, 2147483647)
-    c.DS("avg", "GAUGE", 2 * STEP, 0, 2147483647)
-    c.DS("med", "GAUGE", 2 * STEP, 0, 2147483647)
-    c.DS("q90", "GAUGE", 2 * STEP, 0, 2147483647)
-    c.DS("num", "GAUGE", 2 * STEP, 0, 2147483647)
+    c.DS("min", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
+    c.DS("max", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
+    c.DS("avg", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
+    c.DS("med", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
+    c.DS("q90", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
+    c.DS("num", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
     err := c.Create(true)
     if err != nil {
         panic("could not create dist-rrd file: " + err.Error())
@@ -509,7 +505,7 @@ func http_main(w http.ResponseWriter, r *http.Request) {
             g.SetLowerLimit(0)
             g.SetVLabel("events / minute")
             g.Def("g", filename, "num", "AVERAGE")
-            g.CDef("gpm", fmt.Sprintf("g,%d,*", 60 / STEP))
+            g.CDef("gpm", fmt.Sprintf("g,%d,*", 60 / (*flushInterval)))
             g.VDef("v_max", "gpm,MAXIMUM")
             g.VDef("v_min", "gpm,MINIMUM")
             g.VDef("v_avg", "gpm,AVERAGE")
@@ -531,8 +527,8 @@ func http_main(w http.ResponseWriter, r *http.Request) {
             g.SetVLabel("events / minute")
             g.Def("g", filename, "num", "AVERAGE")
             g.Def("b", bad_filename, "num", "AVERAGE")
-            g.CDef("gpm", fmt.Sprintf("g,%d,*", 60 / STEP))
-            g.CDef("bpm", fmt.Sprintf("b,%d,*", 60 / STEP))
+            g.CDef("gpm", fmt.Sprintf("g,%d,*", 60 / (*flushInterval)))
+            g.CDef("bpm", fmt.Sprintf("b,%d,*", 60 / (*flushInterval)))
             g.CDef("ratio", "bpm,gpm,/,100,*")
             g.VDef("v_max", "gpm,MAXIMUM")
             g.VDef("v_min", "gpm,MINIMUM")
