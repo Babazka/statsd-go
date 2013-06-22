@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"flag"
 	"fmt"
-	"./gmetric"
 	"./rrd"
 	"./embedded"
 	"log"
@@ -47,6 +46,26 @@ var (
 	debug            = flag.Bool("debug", false, "Debug mode")
 )
 
+type TimerDistribution struct {
+    count int
+    count_ps float64
+    mean float64
+    min float64
+    q_50 float64
+    q_75 float64
+    q_90 float64
+    q_95 float64
+    max float64
+}
+
+type StatsdBackend interface {
+    beginAggregation()
+    handleCounter(name string, count int64, count_ps float64)
+    handleGauge(name string, count int64)
+    handleTiming(name string, params TimerDistribution)
+    endAggregation()
+}
+
 var (
 	In       = make(chan Packet, 10000)
 	counters = make(map[string]int)
@@ -61,100 +80,20 @@ func file_exists(filename string) bool {
     return false
 }
 
-func ensure_rrd_dir_exists() {
-    if _, err := os.Stat(RRD_DIR); err == nil {
-        return
-    }
-    os.Mkdir(RRD_DIR, 0755)
-}
-
-func mk_common_rrd(filename string) *rrd.Creator {
-    t := time.Unix(time.Now().Unix() - (*flushInterval), 0)
-    c := rrd.NewCreator(filename, t, (*flushInterval))
-    c.RRA("AVERAGE", 0.5, 1,         4 * 60 * 60 / (*flushInterval))
-    c.RRA("AVERAGE", 0.5, 5,         3 * 24 * 60 * 60 / (5 * (*flushInterval)))
-    c.RRA("AVERAGE", 0.5, 30,       31 * 24 * 60 * 60 / (30 * (*flushInterval)))
-    c.RRA("AVERAGE", 0.5, 6 * 60,    3 * 31 * 24 * 60 * 60 / (6 * 60 * (*flushInterval)))
-    c.RRA("AVERAGE", 0.5, 24 * 60, 365 * 24 * 60 * 60 / (24 * 60 * (*flushInterval)))
-    return c
-}
-
-func mk_metric_filename(metric string) string {
-    return RRD_DIR + "/" + metric + ".rrd"
-}
-
-func ensure_gauge_rrd_exists(metric string) {
-    filename := mk_metric_filename(metric)
-    if _, err := os.Stat(filename); err == nil {
-        return
-    }
-    if *debug {
-        log.Println("Creating rrd %s\n", filename)
-    }
-    c := mk_common_rrd(filename)
-    c.DS("num", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
-    err := c.Create(true)
-    if err != nil {
-        panic("could not create rrd file: " + err.Error())
-    }
-}
-
-func write_to_gauge_rrd(metric string, value int64) {
-    metric = metric + ".gauge"
-    filename := mk_metric_filename(metric)
-    ensure_gauge_rrd_exists(metric)
-    u := rrd.NewUpdater(filename)
-
-    err := u.Update(time.Now(), value)
-    if err != nil {
-        panic("could not update gauge rrd file: " + err.Error())
-    }
-}
-
-func ensure_timing_rrd_exists(metric string) {
-    filename := mk_metric_filename(metric)
-    if _, err := os.Stat(filename); err == nil {
-        return
-    }
-    if *debug {
-        log.Println("Creating dist rrd %s\n", filename)
-    }
-    c := mk_common_rrd(filename)
-    c.DS("min", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
-    c.DS("max", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
-    c.DS("avg", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
-    c.DS("med", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
-    c.DS("q90", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
-    c.DS("num", "GAUGE", 2 * (*flushInterval), 0, 2147483647)
-    err := c.Create(true)
-    if err != nil {
-        panic("could not create dist-rrd file: " + err.Error())
-    }
-}
-
-func write_to_timing_rrd(metric string, min float64, max float64, avg float64,
-                         med float64, q90 float64, num int) {
-    metric = metric + ".timing"
-    filename := mk_metric_filename(metric)
-    ensure_timing_rrd_exists(metric)
-    u := rrd.NewUpdater(filename)
-
-    err := u.Update(time.Now(), min, max, avg, med, q90, num)
-    if err != nil {
-        panic("could not update dist-rrd file: " + err.Error())
-    }
+func buildBackends() []StatsdBackend {
+    var backends []StatsdBackend
+    backends = append(backends, NewRrdBackend())
+    /* TODO use cmdline params */
+    return backends
 }
 
 func monitor() {
-	var err error
-	if err != nil {
-		log.Println(err)
-	}
+    backends := buildBackends()
 	t := time.NewTicker(time.Duration(*flushInterval) * time.Second)
 	for {
 		select {
 		case <-t.C:
-			submit()
+			submit(backends)
 		case s := <-In:
 			if s.Modifier == "ms" {
 				_, ok := timers[s.Bucket]
@@ -183,167 +122,65 @@ func monitor() {
 	}
 }
 
-func submit() {
-	var clientGraphite net.Conn
+func submit(backends []StatsdBackend) {
+    for _, bk := range backends {
+        bk.beginAggregation()
+    }
 
-    ensure_rrd_dir_exists()
-
-	if *graphiteAddress != "" {
-		var err error
-		clientGraphite, err = net.Dial(TCP, *graphiteAddress)
-		if clientGraphite != nil {
-			// Run this when we're all done, only if clientGraphite was opened.
-			defer clientGraphite.Close()
-		}
-		if err != nil {
-			log.Printf(err.Error())
-		}
-	}
-	var useGanglia bool
-	var gm gmetric.Gmetric
-	gmSubmit := func(name string, value uint32) {
-		if useGanglia {
-			if *debug {
-				log.Println("Ganglia send metric %s value %d\n", name, value)
-			}
-			m_value := fmt.Sprint(value)
-			m_units := "count"
-			m_type := uint32(gmetric.VALUE_UNSIGNED_INT)
-			m_slope := uint32(gmetric.SLOPE_BOTH)
-			m_grp := "statsd"
-			m_ival := uint32(*flushInterval * int64(2))
-
-			go gm.SendMetric(name, m_value, m_type, m_units, m_slope, m_ival, m_ival, m_grp)
-		}
-	}
-	gmSubmitFloat := func(name string, value float64) {
-		if useGanglia {
-			if *debug {
-				log.Println("Ganglia send float metric %s value %f\n", name, value)
-			}
-			m_value := fmt.Sprint(value)
-			m_units := "count"
-			m_type := uint32(gmetric.VALUE_DOUBLE)
-			m_slope := uint32(gmetric.SLOPE_BOTH)
-			m_grp := "statsd"
-			m_ival := uint32(*flushInterval * int64(2))
-
-			go gm.SendMetric(name, m_value, m_type, m_units, m_slope, m_ival, m_ival, m_grp)
-		}
-	}
-	if *gangliaAddress != "" {
-		gm = gmetric.Gmetric{
-			Host:  *gangliaSpoofHost,
-			Spoof: *gangliaSpoofHost,
-		}
-		gm.SetVerbose(false)
-
-		if strings.Contains(*gangliaAddress, ",") {
-			segs := strings.Split(*gangliaAddress, ",")
-			for i := 0; i < len(segs); i++ {
-				gIP, err := net.ResolveIPAddr("ip4", segs[i])
-				if err != nil {
-					panic(err.Error())
-				}
-				gm.AddServer(gmetric.GmetricServer{gIP.IP, *gangliaPort})
-			}
-		} else {
-			gIP, err := net.ResolveIPAddr("ip4", *gangliaAddress)
-			if err != nil {
-				panic(err.Error())
-			}
-			gm.AddServer(gmetric.GmetricServer{gIP.IP, *gangliaPort})
-		}
-		useGanglia = true
-	} else {
-		useGanglia = false
-	}
 	numStats := 0
-	now := time.Now()
-	buffer := bytes.NewBufferString("")
 	for s, c := range counters {
-		value := float64(c) / float64((float64(*flushInterval)*float64(time.Second))/float64(1e3))
-		fmt.Fprintf(buffer, "stats.%s %d %d\n", s, value, now)
-		gmSubmitFloat(fmt.Sprintf("stats_%s", s), value)
-		fmt.Fprintf(buffer, "stats_counts.%s %d %d\n", s, c, now)
-		gmSubmit(fmt.Sprintf("stats_counts_%s", s), uint32(c))
-        write_to_gauge_rrd(s, int64(c))
+		value := float64(c) / float64(*flushInterval)
 		counters[s] = 0
+        for _, bk := range backends {
+            bk.handleCounter(s, int64(c), value)
+        }
 		numStats++
 	}
 	for i, g := range gauges {
 		value := int64(g)
-		fmt.Fprintf(buffer, "stats.%s %d %d\n", i, value, now)
-		gmSubmit(fmt.Sprintf("stats_%s", i), uint32(value))
-        write_to_gauge_rrd(i, value)
+        for _, bk := range backends {
+            bk.handleGauge(i, value)
+        }
         gauges[i] = 0  // why wasn't it in the original?
 		numStats++
 	}
 	for u, t := range timers {
+        var td TimerDistribution;
 		if len(t) > 0 {
+            float_len := float64(len(t))
 			sort.Float64s(t)
-			min := float64(t[0])
-			max := float64(t[len(t)-1])
-			med := float64(t[len(t)/2])
-			mean := float64(min)
-            q90 := float64(t[len(t)*9/10])
-			maxAtThreshold := float64(max)
-			count := len(t)
-			count_ps := float64(count) / float64(*flushInterval)
-			if len(t) > 1 {
-				var thresholdIndex int
-				thresholdIndex = ((100 - *percentThreshold) / 100) * count
-				numInThreshold := count - thresholdIndex
-				values := t[0:numInThreshold]
+			td.min = float64(t[0])
+			td.max = float64(t[len(t)-1])
+			td.q_50 = float64(t[len(t)/2])
+            td.q_75 = float64(t[int(float_len*0.75)])
+            td.q_90 = float64(t[int(float_len*0.90)])
+            td.q_95 = float64(t[int(float_len*0.95)])
+			td.count = len(t)
+			td.count_ps = float64(len(t)) / float64(*flushInterval)
 
-				sum := float64(0)
-				for i := 0; i < numInThreshold; i++ {
-					sum += values[i]
-				}
-				mean = float64(sum) / float64(numInThreshold)
-			}
+            sum := float64(0)
+            for i := 0; i < len(t); i++ {
+                sum += t[i]
+            }
+            td.mean = float64(sum) / float64(td.count)
+
 			var z []float64
 			timers[u] = z
-
-			fmt.Fprintf(buffer, "stats.timers.%s.mean %f %d\n", u, mean, now)
-			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_mean", u), mean)
-			fmt.Fprintf(buffer, "stats.timers.%s.upper %f %d\n", u, max, now)
-			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_upper", u), max)
-			fmt.Fprintf(buffer, "stats.timers.%s.upper_%d %f %d\n", u,
-				*percentThreshold, maxAtThreshold, now)
-			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_upper_%d", u, *percentThreshold), maxAtThreshold)
-			fmt.Fprintf(buffer, "stats.timers.%s.lower %f %d\n", u, min, now)
-			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_lower", u), min)
-			fmt.Fprintf(buffer, "stats.timers.%s.count %d %d\n", u, count, now)
-			fmt.Fprintf(buffer, "stats.timers.%s.count_ps %f %d\n", u, count_ps, now)
-			gmSubmit(fmt.Sprintf("stats_timers_%s_count", u), uint32(count))
-
-            write_to_timing_rrd(u, min, max, mean, med, q90, count);
 		} else {
-			// Need to still submit timers as zero
-			fmt.Fprintf(buffer, "stats.timers.%s.mean %f %d\n", u, 0, now)
-			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_mean", u), 0)
-			fmt.Fprintf(buffer, "stats.timers.%s.upper %f %d\n", u, 0, now)
-			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_upper", u), 0)
-			fmt.Fprintf(buffer, "stats.timers.%s.upper_%d %f %d\n", u,
-				*percentThreshold, 0, now)
-			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_upper_%d", u, *percentThreshold), 0)
-			fmt.Fprintf(buffer, "stats.timers.%s.lower %f %d\n", u, 0, now)
-			gmSubmitFloat(fmt.Sprintf("stats_timers_%s_lower", u), 0)
-			fmt.Fprintf(buffer, "stats.timers.%s.count %d %d\n", u, 0, now)
-			fmt.Fprintf(buffer, "stats.timers.%s.count_ps %f %d\n", u, 0, now)
-			gmSubmit(fmt.Sprintf("stats_timers_%s_count", u), uint32(0))
-            write_to_timing_rrd(u, 0, 0, 0, 0, 0, 0);
+			td.min = 0
+			td.max = 0
+			td.q_50 = 0
+			td.mean = 0
+            td.q_75 = 0
+            td.q_90 = 0
+            td.q_95 = 0
+			td.count = 0
+			td.count_ps = 0
 		}
+        for _, bk := range backends {
+            bk.handleTiming(u, td)
+        }
 		numStats++
-	}
-	fmt.Fprintf(buffer, "statsd.numStats %d %d\n", numStats, now)
-	gmSubmit("statsd_numStats", uint32(numStats))
-	if clientGraphite != nil {
-		if *debug {
-			log.Println("Send to graphite: [[[%s]]]\n", string(buffer.Bytes()))
-		}
-		clientGraphite.Write(buffer.Bytes())
 	}
 }
 
