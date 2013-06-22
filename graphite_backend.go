@@ -9,42 +9,42 @@ import (
 )
 
 type GraphiteBackend struct {
-    now time.Time
+    now int64
     buffer *bytes.Buffer
     clientGraphite net.Conn
     graphiteAddress string
 }
 
-func NewGraphiteBackend(graphiteAddress string) GraphiteBackend {
+func NewGraphiteBackend(graphiteAddress string) *GraphiteBackend {
     var b GraphiteBackend
     b.graphiteAddress = graphiteAddress
-    return b
+    return &b
 }
 
-func (b GraphiteBackend) beginAggregation() {
+func (b *GraphiteBackend) beginAggregation() {
     var err error
-	b.now = time.Now()
+	b.now = time.Now().Unix()
     b.buffer = bytes.NewBufferString("")
     b.clientGraphite, err = net.Dial(TCP, b.graphiteAddress)
     if err != nil {
         log.Printf(err.Error())
     }
 }
-func (b GraphiteBackend) endAggregation() {
+func (b *GraphiteBackend) endAggregation() {
     if b.clientGraphite != nil {
         b.clientGraphite.Write(b.buffer.Bytes())
         b.clientGraphite.Close()
     }
 }
 
-func (b GraphiteBackend) handleCounter(name string, count int64, count_ps float64) {
+func (b *GraphiteBackend) handleCounter(name string, count int64, count_ps float64) {
     fmt.Fprintf(b.buffer, "stats.%s %d %d\n", name, count_ps, b.now)
     fmt.Fprintf(b.buffer, "stats_counts.%s %d %d\n", name, count, b.now)
 }
-func (b GraphiteBackend) handleGauge(name string, count int64) {
+func (b *GraphiteBackend) handleGauge(name string, count int64) {
     fmt.Fprintf(b.buffer, "stats.%s %d %d\n", name, count, b.now)
 }
-func (b GraphiteBackend) handleTiming(name string, td TimerDistribution) {
+func (b *GraphiteBackend) handleTiming(name string, td TimerDistribution) {
     fmt.Fprintf(b.buffer, "stats.timers.%s.mean %f %d\n",     name, td.mean, b.now)
     fmt.Fprintf(b.buffer, "stats.timers.%s.upper %f %d\n",    name, td.max, b.now)
     fmt.Fprintf(b.buffer, "stats.timers.%s.upper_%d %f %d\n", name, 75, td.q_75, b.now)

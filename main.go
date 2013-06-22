@@ -44,6 +44,7 @@ var (
 	flushInterval    = flag.Int64("flush-interval", 30, "Flush interval")
 	percentThreshold = flag.Int("percent-threshold", 90, "Threshold percent")
 	debug            = flag.Bool("debug", false, "Debug mode")
+	useRrdBackend    = flag.Bool("rrd", false, "Store data in RRDs")
 )
 
 type TimerDistribution struct {
@@ -82,8 +83,15 @@ func file_exists(filename string) bool {
 
 func buildBackends() []StatsdBackend {
     var backends []StatsdBackend
-    backends = append(backends, NewRrdBackend())
-    /* TODO use cmdline params */
+    if *useRrdBackend {
+        backends = append(backends, NewRrdBackend())
+    }
+    if *graphiteAddress != "" {
+        backends = append(backends, NewGraphiteBackend(*graphiteAddress))
+    }
+    if len(backends) == 0 {
+        log.Printf("WARNING: No backends specified. Data will be lost.\n")
+    }
     return backends
 }
 
@@ -182,6 +190,9 @@ func submit(backends []StatsdBackend) {
         }
 		numStats++
 	}
+    for _, bk := range backends {
+        bk.endAggregation()
+    }
 }
 
 func handleMessage(conn *net.UDPConn, remaddr net.Addr, buf *bytes.Buffer) {
@@ -418,6 +429,7 @@ func http_main(w http.ResponseWriter, r *http.Request) {
 }
 
 func httpServer() {
+    log.Printf("Web interface available at %s", *webAddress)
     http.HandleFunc("/", http_main)
     http.ListenAndServe(*webAddress, nil)
 }

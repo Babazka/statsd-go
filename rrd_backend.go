@@ -14,23 +14,23 @@ const (
 type RrdBackend struct {
 }
 
-func NewRrdBackend() RrdBackend {
+func NewRrdBackend() *RrdBackend {
     var b RrdBackend;
-    return b;
+    return &b;
 }
 
-func (b RrdBackend) beginAggregation() {
+func (b *RrdBackend) beginAggregation() {
     ensure_rrd_dir_exists()
 }
-func (b RrdBackend) endAggregation() {
+func (b *RrdBackend) endAggregation() {
 }
-func (b RrdBackend) handleCounter(name string, count int64, count_ps float64) {
+func (b *RrdBackend) handleCounter(name string, count int64, count_ps float64) {
     write_to_gauge_rrd(name, count)
 }
-func (b RrdBackend) handleGauge(name string, count int64) {
+func (b *RrdBackend) handleGauge(name string, count int64) {
     write_to_gauge_rrd(name, count)
 }
-func (b RrdBackend) handleTiming(name string, td TimerDistribution) {
+func (b *RrdBackend) handleTiming(name string, td TimerDistribution) {
     write_to_timing_rrd(name, td.min, td.max, td.mean, td.q_50, td.q_90, td.count);
 }
 
