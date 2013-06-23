@@ -9,11 +9,26 @@ STATSD-MONITOR
 
 Основано на [STATSD-GO](https://github.com/jbuchbinder/).
 
+Сборка с librrd
+---------------
+
+`go build -tags rrd`
+
+Запуск: `./statsd-monitor --rrd`
+
 Зависимости:
  * `librrd-dev` для сборки
  * `librrd` для работы
 
-TODO:
+Сборка без librrd
+-----------------
+
+`go build`
+
+Соответственно, библиотека `librrd` не нужна ни при сборке, ни при выполнении.
+
+TODO
+----
 
  * <del>подключить https://github.com/ziutek/rrd</del>
  * нарисовать веб-интерфейс для просмотра графиков
