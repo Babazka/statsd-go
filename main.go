@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"bytes"
 	"flag"
 	"log"
@@ -17,9 +16,6 @@ const (
 	UDP = "udp"
 )
 
-const (
-    RRD_DIR = "data"
-)
 
 type Packet struct {
 	Bucket   string
@@ -64,12 +60,6 @@ var (
 	gauges   = make(map[string]int)
 )
 
-func file_exists(filename string) bool {
-    if _, err := os.Stat(filename); err == nil {
-        return true
-    }
-    return false
-}
 
 func buildBackends() []StatsdBackend {
     var backends []StatsdBackend

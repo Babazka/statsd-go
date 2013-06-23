@@ -18,6 +18,7 @@ import (
 
 const (
     RRD_STEP = 30
+    RRD_DIR = "data"
 )
 
 var (
@@ -30,6 +31,7 @@ type RrdBackend struct {
 func NewRrdBackend() *RrdBackend {
     var b RrdBackend;
 	go rrdHttpServer()
+    log.Printf("Writing to RRD files at %s/\n", *RRD_DIR)
     return &b;
 }
 
