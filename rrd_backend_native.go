@@ -18,7 +18,7 @@ const (
 
 var (
 	whisperPath   = flag.String("whisper-data-dir", "data", "Path to storage directory for whisper files")
-	archiveParams  = flag.String("archive-params", "10s:3h,1min:7d,30min:1y", "Whisper archive params (pairs of precision:retention)")
+	archiveParams  = flag.String("archive-params", "10s:3h,1m:7d,30m:1y", "Whisper archive params (pairs of precision:retention)")
     parsedArchiveParams whisper.Retentions
 )
 
