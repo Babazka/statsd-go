@@ -20,17 +20,20 @@ STATSD-MONITOR
  * `librrd-dev` для сборки
  * `librrd` для работы
 
-Сборка без librrd
------------------
+Сборка с поддержкой whisper-файлов
+----------------------------------
 
 `go build`
 
+Запуск: `./statsd-monitor --rrd`
+
 Соответственно, библиотека `librrd` не нужна ни при сборке, ни при выполнении.
+
 
 TODO
 ----
 
  * <del>подключить https://github.com/ziutek/rrd</del>
+ * <del>подключить https://github.com/robyoung/go-whisper</del>
  * нарисовать веб-интерфейс для просмотра графиков
- * добавить отправку в upstream для создания деревьев из statsd-monitor'ов
 
