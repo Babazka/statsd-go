@@ -36,11 +36,9 @@ type Packet struct {
 
 var (
 	serviceAddress   = flag.String("address", ":8125", "UDP service address")
+	fwdToAddress     = flag.String("fwd-to", "", "Forward UDP packets to this address")
 	webAddress       = flag.String("webface", ":5400", "HTTP web interface address")
 	graphiteAddress  = flag.String("graphite", "", "Graphite service address (example: 'localhost:2003')")
-	gangliaAddress   = flag.String("ganglia", "", "Ganglia gmond servers, comma separated")
-	gangliaPort      = flag.Int("ganglia-port", 8649, "Ganglia gmond service port")
-	gangliaSpoofHost = flag.String("ganglia-spoof-host", "", "Ganglia gmond spoof host string")
 	flushInterval    = flag.Int64("flush-interval", 30, "Flush interval")
 	percentThreshold = flag.Int("percent-threshold", 90, "Threshold percent")
 	debug            = flag.Bool("debug", false, "Debug mode")
@@ -229,19 +227,40 @@ func handleMessage(conn *net.UDPConn, remaddr net.Addr, buf *bytes.Buffer) {
 }
 
 func udpListener() {
+    var fwdConn *net.UDPConn
+    var fwdToAddr *net.UDPAddr
+    if *fwdToAddress != "" {
+        var e error
+        fwdToAddr, e = net.ResolveUDPAddr(UDP, *fwdToAddress)
+        if e != nil {
+            log.Fatalf("Cannot resolve forwarding address '%s'", *fwdToAddress)
+        }
+        fwdConn, e = net.DialUDP(UDP, nil, fwdToAddr)
+        if e != nil {
+            log.Fatalf("Cannot connect to '%s' via UDP (whatever what means in Go)", *fwdToAddress)
+        }
+    }
 	address, _ := net.ResolveUDPAddr(UDP, *serviceAddress)
 	listener, err := net.ListenUDP(UDP, address)
 	defer listener.Close()
 	if err != nil {
 		log.Fatalf("ListenAndServe: %s", err.Error())
 	}
+
     log.Printf("Listening to UDP at %s", *serviceAddress)
+    if fwdConn != nil {
+        log.Printf("Forwarding UDP traffic to %s", *fwdToAddress)
+    }
+
 	for {
 		message := make([]byte, 512)
 		n, remaddr, error := listener.ReadFrom(message)
 		if error != nil {
 			continue
 		}
+        if fwdConn != nil {
+            fwdConn.Write(message[0:n])
+        }
 		buf := bytes.NewBuffer(message[0:n])
 		if *debug {
 			log.Println("Packet received: " + string(message[0:n]))
