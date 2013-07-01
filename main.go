@@ -206,6 +206,18 @@ func handleMessage(conn *net.UDPConn, remaddr net.Addr, buf *bytes.Buffer) {
 
 		In <- packet
 	}
+
+    //packet.Bucket = "statsd.packets_received"
+    //packet.Value = "1"
+    //packet.Modifier = "c"
+    //packet.Sampling = 1
+    //In <- packet
+
+    packet.Bucket = "statsd-monitor.packets_received"
+    packet.Value = "1"
+    packet.Modifier = "c"
+    packet.Sampling = 1
+    In <- packet
 }
 
 func udpListener() {
