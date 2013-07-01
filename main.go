@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"flag"
 	"log"
+	"runtime/pprof"
+	"os"
 	"net"
 	"regexp"
 	"sort"
@@ -30,7 +32,8 @@ var (
 	graphiteAddress  = flag.String("graphite", "", "Graphite service address (example: 'localhost:2003')")
 	flushInterval    = flag.Int64("flush-interval", 30, "Flush interval")
 	debug            = flag.Bool("debug", false, "Debug mode")
-	useRrdBackend    = flag.Bool("rrd", false, "Store data in RRDs")
+	useRrdBackend    = flag.Bool("rrd", false, "Store data in RRDs or Whisper files")
+    cpuprofile       = flag.String("cpuprofile", "", "Write cpu profile to this file")
 )
 
 type TimerDistribution struct {
@@ -265,6 +268,16 @@ func udpListener() {
 
 func main() {
 	flag.Parse()
+
+    if *cpuprofile != "" {
+        f, err := os.Create(*cpuprofile)
+        if err != nil {
+            log.Fatal(err)
+        }
+        pprof.StartCPUProfile(f)
+        defer pprof.StopCPUProfile()
+    }
+
 	go udpListener()
 	monitor()
 }
