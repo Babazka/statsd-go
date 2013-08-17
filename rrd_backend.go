@@ -192,13 +192,17 @@ func http_main(w http.ResponseWriter, r *http.Request) {
         }
         metrics = make([]string, 0)
         for _, file := range files {
-            if !strings.HasSuffix(file.Name(), ".timing.rrd") {
-                continue
-            }
             if !strings.HasPrefix(file.Name(), search_prefix) {
                 continue
             }
-            metrics = append(metrics, strings.Replace(file.Name(), ".timing.rrd", "", 1))
+            if strings.HasSuffix(file.Name(), ".timing.rrd") {
+                metrics = append(metrics, strings.Replace(file.Name(), ".timing.rrd", "", 1))
+                continue
+            }
+            if strings.HasSuffix(file.Name(), ".gauge.rrd") {
+                metrics = append(metrics, strings.Replace(file.Name(), ".gauge.rrd", "", 1))
+                continue
+            }
         }
     }
 
@@ -235,15 +239,14 @@ func http_main(w http.ResponseWriter, r *http.Request) {
         if metric_type == "gauge" {
             g.SetTitle(metric)
             g.SetLowerLimit(0)
-            g.SetVLabel("events / minute")
+            g.SetVLabel("value")
             g.Def("g", filename, "num", "AVERAGE")
-            g.CDef("gpm", fmt.Sprintf("g,%d,*", 60 / (*flushInterval)))
-            g.VDef("v_max", "gpm,MAXIMUM")
-            g.VDef("v_min", "gpm,MINIMUM")
-            g.VDef("v_avg", "gpm,AVERAGE")
-            /*g.VDef("v_q90", "gpm,90,PERCENTNAN")*/
-            g.Area("gpm", "eeffee")
-            g.Line(2, "gpm", "008800")
+            g.VDef("v_max", "g,MAXIMUM")
+            g.VDef("v_min", "g,MINIMUM")
+            g.VDef("v_avg", "g,AVERAGE")
+            /*g.VDef("v_q90", "g,90,PERCENTNAN")*/
+            g.Area("g", "eeffee")
+            g.Line(2, "g", "008800")
             g.GPrint("v_min", "min = %.0lf")
             g.GPrint("v_max", "max = %.0lf")
             g.GPrint("v_avg", "avg = %.0lf")
@@ -300,6 +303,8 @@ func http_main(w http.ResponseWriter, r *http.Request) {
             g.GPrint("v_avg", "avg = %.0lf")
             g.GPrint("v_q90", "q90 = %.0lf")
         }
+
+        g.SetSize(600, 130)
 
         _, buf, err := g.Graph(t.Add(-time.Duration(60*minutes)*time.Second), t)
         if err != nil {

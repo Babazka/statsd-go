@@ -30,7 +30,7 @@ var (
 	serviceAddress   = flag.String("address", ":8125", "UDP service address")
 	fwdToAddress     = flag.String("fwd-to", "", "Forward UDP packets to this address")
 	graphiteAddress  = flag.String("graphite", "", "Graphite service address (example: 'localhost:2003')")
-	flushInterval    = flag.Int64("flush-interval", 30, "Flush interval")
+	flushInterval    = flag.Int64("flush-interval", 10, "Flush interval")
 	debug            = flag.Bool("debug", false, "Debug mode")
 	useRrdBackend    = flag.Bool("rrd", false, "Store data in RRDs or Whisper files")
     cpuprofile       = flag.String("cpuprofile", "", "Write cpu profile to this file")
@@ -95,12 +95,9 @@ func monitor() {
 				floatValue, _ := strconv.ParseFloat(s.Value, 32)
 				timers[s.Bucket] = append(timers[s.Bucket], floatValue)
 			} else if s.Modifier == "g" {
-				_, ok := gauges[s.Bucket]
-				if !ok {
-					gauges[s.Bucket] = 0
-				}
-				intValue, _ := strconv.Atoi(s.Value)
-				gauges[s.Bucket] += intValue
+                floatValue, _ := strconv.ParseFloat(s.Value, 32)
+				intValue := int(floatValue)
+				gauges[s.Bucket] = intValue
 			} else {
 				_, ok := counters[s.Bucket]
 				if !ok {
@@ -132,7 +129,6 @@ func submit(backends []StatsdBackend) {
         for _, bk := range backends {
             bk.handleGauge(i, value)
         }
-        gauges[i] = 0  // why wasn't it in the original?
 		numStats++
 	}
 	for u, t := range timers {
@@ -178,12 +174,14 @@ func submit(backends []StatsdBackend) {
     }
 }
 
+var sanitizeRegexp = regexp.MustCompile("[^a-zA-Z0-9\\-_\\.:\\|@]")
+var packetRegexp = regexp.MustCompile("([a-zA-Z0-9_\\.\\-]+):(\\-?[0-9\\.]+)\\|(c|g|ms)(\\|@([0-9\\.]+))?")
+
 func handleMessage(conn *net.UDPConn, remaddr net.Addr, buf *bytes.Buffer) {
 	var packet Packet
 	var value string
-	var sanitizeRegexp = regexp.MustCompile("[^a-zA-Z0-9\\-_\\.:\\|@]")
-	var packetRegexp = regexp.MustCompile("([a-zA-Z0-9_\\.\\-]+):(\\-?[0-9\\.]+)\\|(c|g|ms)(\\|@([0-9\\.]+))?")
-	s := sanitizeRegexp.ReplaceAllString(buf.String(), "")
+	/*s := sanitizeRegexp.ReplaceAllString(buf.String(), "")*/
+    s := buf.String()
 	for _, item := range packetRegexp.FindAllStringSubmatch(s, -1) {
 		value = item[2]
 		if item[3] == "ms" {
