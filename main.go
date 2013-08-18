@@ -34,6 +34,7 @@ var (
 	debug            = flag.Bool("debug", false, "Debug mode")
 	useRrdBackend    = flag.Bool("rrd", false, "Store data in RRDs or Whisper files")
     cpuprofile       = flag.String("cpuprofile", "", "Write cpu profile to this file")
+    logThis          = flag.String("log-this", "", "Log these metrics to stdout on every flush")
 )
 
 type TimerDistribution struct {
@@ -72,9 +73,13 @@ func buildBackends() []StatsdBackend {
     if *graphiteAddress != "" {
         backends = append(backends, NewGraphiteBackend(*graphiteAddress))
     }
+	if *logThis != "" {
+        backends = append(backends, NewStdoutBackend(*logThis))
+	}
     if len(backends) == 0 {
         log.Printf("WARNING: No backends specified. Data will be lost.\n")
     }
+	backends = append(backends, NewRrdBackend())
     return backends
 }
 
