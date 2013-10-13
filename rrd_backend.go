@@ -17,7 +17,7 @@ import (
 )
 
 const (
-    RRD_STEP = 30
+    RRD_STEP = 10
     RRD_DIR = "data"
 )
 
@@ -144,15 +144,15 @@ func get_metric_type(metric string) string {
     return ""
 }
 
-func http_metric_page(w http.ResponseWriter, r *http.Request, metric string, metric_type string, path_tail string) {
+func http_metric_page(w http.ResponseWriter, r *http.Request, metric string, metric_type string, path_tail string, minutes int) {
     w.Header().Set("Content-type", "text/html")
     if metric_type == "timing" {
-        fmt.Fprintf(w, "<img src=\"/%s/timing/%s\">", metric, path_tail)
+        fmt.Fprintf(w, "<img src=\"/%s/timing/%s/%d/\">", metric, path_tail, minutes)
     }
     if file_exists(mk_metric_filename(metric + ".bad.gauge")) {
-        fmt.Fprintf(w, "<img src=\"/%s/gaugebad/%s\">", metric, path_tail)
+        fmt.Fprintf(w, "<img src=\"/%s/gaugebad/%s/%d\">", metric, path_tail, minutes)
     } else {
-        fmt.Fprintf(w, "<img src=\"/%s/gauge/%s\">", metric, path_tail)
+        fmt.Fprintf(w, "<img src=\"/%s/gauge/%s/%d\">", metric, path_tail, minutes)
     }
     fmt.Fprintf(w, "<br/>")
 }
@@ -164,6 +164,18 @@ func concat(old1, old2 []string) []string {
     return newslice
 }
 
+func get_int_param(r *http.Request, name string) (int, bool) {
+	v_arr, ok := r.URL.Query()[name]
+	if !ok {
+		return 0, false
+	}
+	v_i, err := strconv.Atoi(v_arr[0])
+	if err != nil {
+		return 0, false
+	}
+	return v_i, true
+}
+
 func http_main(w http.ResponseWriter, r *http.Request) {
     path := strings.Split(r.URL.Path[1:], "/")
 
@@ -172,6 +184,11 @@ func http_main(w http.ResponseWriter, r *http.Request) {
         w.Write(embedded.Favicon_ico())
         return
     }
+
+	period_minutes, ok := get_int_param(r, "minutes")
+	if !ok {
+		period_minutes = 30
+	}
 
     metrics := strings.Split(path[0], ";")
 
@@ -217,14 +234,14 @@ func http_main(w http.ResponseWriter, r *http.Request) {
         filename := mk_metric_filename(metric + "." + metric_type)
         if len(path) > 1 {
             if path[1] == "html" {
-                http_metric_page(w, r, metric, metric_type, strings.Join(path[2:], "/"))
+                http_metric_page(w, r, metric, metric_type, strings.Join(path[2:], "/"), period_minutes)
                 continue
             }
             metric_type = path[1]
         }
 
         t := time.Now()
-        minutes := 30;
+        minutes := period_minutes;
 
         if len(path) > 2 && len(path[2]) > 0 {
             m, err := strconv.Atoi(path[2])
