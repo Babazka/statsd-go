@@ -1,4 +1,4 @@
-// +build rrd
+// +build !rrd
 
 package rrd
 

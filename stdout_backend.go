@@ -26,9 +26,9 @@ func (b *StdoutBackend) handleCounter(name string, count int64, count_ps float64
 		fmt.Printf("%s %d\n", name, count)
 	}
 }
-func (b *StdoutBackend) handleGauge(name string, count int64) {
+func (b *StdoutBackend) handleGauge(name string, v float64) {
 	if strings.HasPrefix(name, b.prefix) {
-		fmt.Printf("%s %d\n", name, count)
+		fmt.Printf("%s %f\n", name, v)
 	}
 }
 func (b *StdoutBackend) handleTiming(name string, td TimerDistribution) {

@@ -1,4 +1,4 @@
-// +build rrd
+// +build !rrd
 
 package main
 
@@ -41,13 +41,13 @@ func (b *RrdBackend) beginAggregation() {
 func (b *RrdBackend) endAggregation() {
 }
 func (b *RrdBackend) handleCounter(name string, count int64, count_ps float64) {
-    write_to_gauge_rrd(name, count)
+    write_to_gauge_rrd(name, count_ps)
 }
-func (b *RrdBackend) handleGauge(name string, count int64) {
-    write_to_gauge_rrd(name, count)
+func (b *RrdBackend) handleGauge(name string, v float64) {
+    write_to_gauge_rrd(name, v)
 }
 func (b *RrdBackend) handleTiming(name string, td TimerDistribution) {
-    write_to_timing_rrd(name, td.min, td.max, td.mean, td.q_50, td.q_90, td.count);
+    write_to_timing_rrd(name, td.min, td.max, td.mean, td.q_50, td.q_90, td.count_ps);
 }
 
 func ensure_rrd_dir_exists() {
@@ -88,7 +88,7 @@ func ensure_gauge_rrd_exists(metric string) {
     }
 }
 
-func write_to_gauge_rrd(metric string, value int64) {
+func write_to_gauge_rrd(metric string, value float64) {
     metric = metric + ".gauge"
     filename := mk_metric_filename(metric)
     ensure_gauge_rrd_exists(metric)
@@ -122,7 +122,7 @@ func ensure_timing_rrd_exists(metric string) {
 }
 
 func write_to_timing_rrd(metric string, min float64, max float64, avg float64,
-                         med float64, q90 float64, num int) {
+                         med float64, q90 float64, num float64) {
     metric = metric + ".timing"
     filename := mk_metric_filename(metric)
     ensure_timing_rrd_exists(metric)
@@ -261,12 +261,14 @@ func http_main(w http.ResponseWriter, r *http.Request) {
             g.VDef("v_max", "g,MAXIMUM")
             g.VDef("v_min", "g,MINIMUM")
             g.VDef("v_avg", "g,AVERAGE")
+            g.VDef("v_last", "g,LAST")
             /*g.VDef("v_q90", "g,90,PERCENTNAN")*/
             g.Area("g", "eeffee")
             g.Line(2, "g", "008800")
             g.GPrint("v_min", "min = %.0lf")
             g.GPrint("v_max", "max = %.0lf")
             g.GPrint("v_avg", "avg = %.0lf")
+            g.GPrint("v_last", "last = %.0lf")
             /*g.GPrint("v_q90", "q90 = %.0lf")*/
         } else if metric_type == "gaugebad" {
             bad_filename := mk_metric_filename(metric + ".bad.gauge")
@@ -286,6 +288,7 @@ func http_main(w http.ResponseWriter, r *http.Request) {
             g.VDef("v_min", "gpm,MINIMUM")
             g.VDef("v_avg", "gpm,AVERAGE")
             g.VDef("v_rat", "ratio,AVERAGE")
+            g.VDef("v_last", "gpm,LAST")
             /*g.VDef("v_q90", "gpm,90,PERCENTNAN")*/
             g.Area("gpm", "eeffee")
             g.Area("bpm", "ffeeee")
@@ -294,6 +297,7 @@ func http_main(w http.ResponseWriter, r *http.Request) {
             g.GPrint("v_min", "min = %.0lf")
             g.GPrint("v_max", "max = %.0lf")
             g.GPrint("v_avg", "avg = %.0lf")
+            g.GPrint("v_last", "last = %.0lf")
             /*g.GPrint("v_q90", "q90 = %.0lf")*/
             g.GPrint("v_rat", "bad = %.0lf%%")
         } else if metric_type == "timing" {

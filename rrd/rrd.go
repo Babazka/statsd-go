@@ -1,4 +1,4 @@
-// +build rrd
+// +build !rrd
 
 // Simple wrapper for rrdtool C library
 package rrd

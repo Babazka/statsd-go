@@ -32,7 +32,6 @@ var (
 	graphiteAddress  = flag.String("graphite", "", "Graphite service address (example: 'localhost:2003')")
 	flushInterval    = flag.Int64("flush-interval", 10, "Flush interval")
 	debug            = flag.Bool("debug", false, "Debug mode")
-	useRrdBackend    = flag.Bool("rrd", false, "Store data in RRDs or Whisper files")
     cpuprofile       = flag.String("cpuprofile", "", "Write cpu profile to this file")
     logThis          = flag.String("log-this", "", "Log these metrics to stdout on every flush")
 )
@@ -52,7 +51,7 @@ type TimerDistribution struct {
 type StatsdBackend interface {
     beginAggregation()
     handleCounter(name string, count int64, count_ps float64)
-    handleGauge(name string, count int64)
+    handleGauge(name string, v float64)
     handleTiming(name string, params TimerDistribution)
     endAggregation()
 }
@@ -67,18 +66,12 @@ var (
 
 func buildBackends() []StatsdBackend {
     var backends []StatsdBackend
-    if *useRrdBackend {
-        backends = append(backends, NewRrdBackend())
-    }
     if *graphiteAddress != "" {
         backends = append(backends, NewGraphiteBackend(*graphiteAddress))
     }
 	if *logThis != "" {
         backends = append(backends, NewStdoutBackend(*logThis))
 	}
-    if len(backends) == 0 {
-        log.Printf("WARNING: No backends specified. Data will be lost.\n")
-    }
 	backends = append(backends, NewRrdBackend())
     return backends
 }
@@ -98,7 +91,13 @@ func monitor() {
 					timers[s.Bucket] = t
 				}
 				floatValue, _ := strconv.ParseFloat(s.Value, 32)
-				timers[s.Bucket] = append(timers[s.Bucket], floatValue)
+				if s.Sampling < 1.0 {
+					for i := 0; float32(i) < (1 / s.Sampling); i++ {
+						timers[s.Bucket] = append(timers[s.Bucket], floatValue)
+					}
+				} else {
+					timers[s.Bucket] = append(timers[s.Bucket], floatValue)
+				}
 			} else if s.Modifier == "g" {
                 floatValue, _ := strconv.ParseFloat(s.Value, 32)
 				intValue := int(floatValue)
@@ -130,9 +129,8 @@ func submit(backends []StatsdBackend) {
 		numStats++
 	}
 	for i, g := range gauges {
-		value := int64(g)
         for _, bk := range backends {
-            bk.handleGauge(i, value)
+            bk.handleGauge(i, float64(g))
         }
 		numStats++
 	}

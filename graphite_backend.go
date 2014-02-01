@@ -41,8 +41,8 @@ func (b *GraphiteBackend) handleCounter(name string, count int64, count_ps float
     fmt.Fprintf(b.buffer, "stats.%s %d %d\n", name, count_ps, b.now)
     fmt.Fprintf(b.buffer, "stats_counts.%s %d %d\n", name, count, b.now)
 }
-func (b *GraphiteBackend) handleGauge(name string, count int64) {
-    fmt.Fprintf(b.buffer, "stats.%s %d %d\n", name, count, b.now)
+func (b *GraphiteBackend) handleGauge(name string, v float64) {
+    fmt.Fprintf(b.buffer, "stats.%s %f %d\n", name, v, b.now)
 }
 func (b *GraphiteBackend) handleTiming(name string, td TimerDistribution) {
     fmt.Fprintf(b.buffer, "stats.timers.%s.mean %f %d\n",     name, td.mean, b.now)
