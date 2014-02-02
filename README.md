@@ -7,27 +7,18 @@ STATSD-MONITOR
 
 Сбор и агрегация статистических данных по протоколу statsd + хранение данных и рисование графиков с помощью RRD в одном бинарнике.
 
-Основано на [STATSD-GO](https://github.com/jbuchbinder/).
+Основано на [STATSD-GO](https://github.com/jbuchbinder/statsd-go).
 
 Сборка с librrd
 ---------------
 
-`go build -tags rrd`
+`go build`
 
-Запуск: `./statsd-monitor --rrd`
+Запуск: `./statsd-monitor`
 
 Зависимости:
  * `librrd-dev` для сборки
  * `librrd` для работы
-
-Сборка с поддержкой whisper-файлов
-----------------------------------
-
-`go build`
-
-Запуск: `./statsd-monitor --rrd`
-
-Соответственно, библиотека `librrd` не нужна ни при сборке, ни при выполнении.
 
 
 TODO
