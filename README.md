@@ -20,11 +20,3 @@ STATSD-MONITOR
  * `librrd-dev` для сборки
  * `librrd` для работы
 
-
-TODO
-----
-
- * <del>подключить https://github.com/ziutek/rrd</del>
- * <del>подключить https://github.com/robyoung/go-whisper</del>
- * нарисовать веб-интерфейс для просмотра графиков
-
