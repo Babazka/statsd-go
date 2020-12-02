@@ -6,7 +6,7 @@ package rrd
 #include <stdlib.h>
 #include <rrd.h>
 #include "rrdfunc.h"
-#cgo LDFLAGS: -lrrd_th
+#cgo LDFLAGS: -lrrd
 */
 import "C"
 import (

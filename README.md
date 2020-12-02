@@ -11,12 +11,11 @@ STATSD-MONITOR
 
 Сборка с librrd
 ---------------
+Зависимости:
+ * `librrd-dev` для сборки
+ * `librrd8` для работы
 
 `go build`
 
 Запуск: `./statsd-monitor`
-
-Зависимости:
- * `librrd-dev` для сборки
- * `librrd` для работы
 
