@@ -1,5 +1,3 @@
-// +build !rrd
-
 // Simple wrapper for rrdtool C library
 package rrd
 
@@ -7,9 +5,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
 	"strings"
 	"time"
-	"unsafe"
 )
 
 type Error string
@@ -18,6 +16,7 @@ func (e Error) Error() string {
 	return string(e)
 }
 
+/*
 type cstring []byte
 
 func newCstring(s string) cstring {
@@ -36,6 +35,7 @@ func (cs cstring) p() unsafe.Pointer {
 func (cs cstring) String() string {
 	return string(cs[:len(cs)-1])
 }
+*/
 
 func join(args []interface{}) string {
 	sa := make([]string, len(args))
@@ -72,10 +72,16 @@ func NewCreator(filename string, start time.Time, step uint) *Creator {
 	}
 }
 
+// DS formats a DS argument and appends it to the list of arguments to be
+// passed to rrdcreate(). Each element of args is formatted with fmt.Sprint().
+// Please see the rrdcreate(1) manual page for in-depth documentation.
 func (c *Creator) DS(name, compute string, args ...interface{}) {
 	c.args = append(c.args, "DS:"+name+":"+compute+":"+join(args))
 }
 
+// RRA formats an RRA argument and appends it to the list of arguments to be
+// passed to rrdcreate(). Each element of args is formatted with fmt.Sprint().
+// Please see the rrdcreate(1) manual page for in-depth documentation.
 func (c *Creator) RRA(cf string, args ...interface{}) {
 	c.args = append(c.args, "RRA:"+cf+":"+join(args))
 }
@@ -98,27 +104,38 @@ func (c *Creator) Create(overwrite bool) error {
 	return c.create()
 }
 
-// Use cstring and unsafe.Pointer to avoid alocations for C calls
+// Use cstring and unsafe.Pointer to avoid allocations for C calls
 
 type Updater struct {
-	filename cstring
-	template cstring
+	filename *cstring
+	template *cstring
 
-	args []unsafe.Pointer
+	args []*cstring
 }
 
 func NewUpdater(filename string) *Updater {
-	return &Updater{filename: newCstring(filename)}
+	u := &Updater{filename: newCstring(filename)}
+	runtime.SetFinalizer(u, cfree)
+	return u
+}
+
+func cfree(u *Updater) {
+	u.filename.Free()
+	u.template.Free()
+	for _, a := range u.args {
+		a.Free()
+	}
 }
 
 func (u *Updater) SetTemplate(dsName ...string) {
+	u.template.Free()
 	u.template = newCstring(strings.Join(dsName, ":"))
 }
 
 // Cache chaches data for later save using Update(). Use it to avoid
 // open/read/write/close for every update.
 func (u *Updater) Cache(args ...interface{}) {
-	u.args = append(u.args, newCstring(join(args)).p())
+	u.args = append(u.args, newCstring(join(args)))
 }
 
 // Update saves data in RRDB.
@@ -126,11 +143,15 @@ func (u *Updater) Cache(args ...interface{}) {
 // If you specify args it saves them immediately.
 func (u *Updater) Update(args ...interface{}) error {
 	if len(args) != 0 {
-		a := make([]unsafe.Pointer, 1)
-		a[0] = newCstring(join(args)).p()
-		return u.update(a)
+		cs := newCstring(join(args))
+		err := u.update([]*cstring{cs})
+		cs.Free()
+		return err
 	} else if len(u.args) != 0 {
 		err := u.update(u.args)
+		for _, a := range u.args {
+			a.Free()
+		}
 		u.args = nil
 		return err
 	}
@@ -147,6 +168,7 @@ type Grapher struct {
 	title           string
 	vlabel          string
 	width, height   uint
+	borderWidth     uint
 	upperLimit      float64
 	lowerLimit      float64
 	rigid           bool
@@ -167,7 +189,7 @@ type Grapher struct {
 
 	lazy bool
 
-	color string
+	colors map[string]string
 
 	slopeMode bool
 
@@ -176,13 +198,16 @@ type Grapher struct {
 	imageFormat string
 	interlaced  bool
 
+	daemon string
+
 	args []string
 }
 
 const (
-	maxUint = ^uint(0)
-	maxInt  = int(maxUint >> 1)
-	minInt  = -maxInt - 1
+	maxUint  = ^uint(0)
+	maxInt   = int(maxUint >> 1)
+	minInt   = -maxInt - 1
+	defWidth = 2
 )
 
 func NewGrapher() *Grapher {
@@ -190,6 +215,8 @@ func NewGrapher() *Grapher {
 		upperLimit:    -math.MaxFloat64,
 		lowerLimit:    math.MaxFloat64,
 		unitsExponent: minInt,
+		borderWidth:   defWidth,
+		colors:        make(map[string]string),
 	}
 }
 
@@ -204,6 +231,10 @@ func (g *Grapher) SetVLabel(vlabel string) {
 func (g *Grapher) SetSize(width, height uint) {
 	g.width = width
 	g.height = height
+}
+
+func (g *Grapher) SetBorder(width uint) {
+	g.borderWidth = width
 }
 
 func (g *Grapher) SetLowerLimit(limit float64) {
@@ -265,7 +296,7 @@ func (g *Grapher) SetLazy() {
 }
 
 func (g *Grapher) SetColor(colortag, color string) {
-	g.color = colortag + "#" + color
+	g.colors[colortag] = color
 }
 
 func (g *Grapher) SetSlopeMode() {
@@ -286,6 +317,14 @@ func (g *Grapher) SetBase(base uint) {
 
 func (g *Grapher) SetWatermark(watermark string) {
 	g.watermark = watermark
+}
+
+func (g *Grapher) SetDaemon(daemon string) {
+	g.daemon = daemon
+}
+
+func (g *Grapher) AddOptions(options ...string) {
+	g.args = append(g.args, options...)
 }
 
 func (g *Grapher) push(cmd string, options []string) {
@@ -333,7 +372,7 @@ func (g *Grapher) VRule(t interface{}, color string, options ...string) {
 	if v, ok := t.(time.Time); ok {
 		t = v.Unix()
 	}
-	vr := fmt.Sprintf("VRULE:%s#%s", t, color)
+	vr := fmt.Sprintf("VRULE:%v#%s", t, color)
 	g.push(vr, options)
 }
 
@@ -370,7 +409,7 @@ func (g *Grapher) Shift(vname string, offset interface{}) {
 	if v, ok := offset.(time.Duration); ok {
 		offset = int64((v + time.Second/2) / time.Second)
 	}
-	shift := fmt.Sprintf("SHIFT:%s:%s", offset)
+	shift := fmt.Sprintf("SHIFT:%s:%v", vname, offset)
 	g.push(shift, nil)
 }
 
@@ -402,4 +441,63 @@ type FetchResult struct {
 
 func (r *FetchResult) ValueAt(dsIndex, rowIndex int) float64 {
 	return r.values[len(r.DsNames)*rowIndex+dsIndex]
+}
+
+type Exporter struct {
+	maxRows uint
+
+	daemon string
+
+	args []string
+}
+
+func NewExporter() *Exporter {
+	return &Exporter{}
+}
+
+func (e *Exporter) SetMaxRows(maxRows uint) {
+	e.maxRows = maxRows
+}
+
+func (e *Exporter) push(cmd string, options []string) {
+	if len(options) > 0 {
+		cmd += ":" + strings.Join(options, ":")
+	}
+	e.args = append(e.args, cmd)
+}
+
+func (e *Exporter) Def(vname, rrdfile, dsname, cf string, options ...string) {
+	e.push(
+		fmt.Sprintf("DEF:%s=%s:%s:%s", vname, rrdfile, dsname, cf),
+		options,
+	)
+}
+
+func (e *Exporter) CDef(vname, rpn string) {
+	e.push("CDEF:"+vname+"="+rpn, nil)
+}
+
+func (e *Exporter) XportDef(vname, label string) {
+	e.push("XPORT:"+vname+":"+label, nil)
+}
+
+func (e *Exporter) Xport(start, end time.Time, step time.Duration) (XportResult, error) {
+	return e.xport(start, end, step)
+}
+
+func (e *Exporter) SetDaemon(daemon string) {
+	e.daemon = daemon
+}
+
+type XportResult struct {
+	Start   time.Time
+	End     time.Time
+	Step    time.Duration
+	Legends []string
+	RowCnt  int
+	values  []float64
+}
+
+func (r *XportResult) ValueAt(legendIndex, rowIndex int) float64 {
+	return r.values[len(r.Legends)*rowIndex+legendIndex]
 }

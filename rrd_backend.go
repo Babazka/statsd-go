@@ -192,7 +192,7 @@ func http_main(w http.ResponseWriter, r *http.Request) {
 
     metrics := strings.Split(path[0], ";")
 
-    if path[0] == "index" {
+    if path[0] == "" {
         search_prefix := ""
 
         if len(path) > 1 && len(path[1]) != 0  {
